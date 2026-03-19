@@ -7,6 +7,7 @@ const { t } = useI18n()
 
 const gameStore = useGameStore()
 const refreshing = ref(false)
+
 async function refreshGameData() {
   refreshing.value = true
   try {
@@ -18,23 +19,29 @@ async function refreshGameData() {
 </script>
 
 <template>
-  <div> {{ t('Milkonomy') }} v{{ version }}</div>
+  <div> {{ t("Milkonomy") }} v{{ version }}</div>
   <div v-if="gameStore.gameData">
     <span>
       GameData: {{ gameStore.gameData.gameVersion }}
       ({{ new Date(gameStore.gameData.versionTimestamp).toLocaleString() }})
     </span>
     <el-button size="small" style="margin-left: 8px;" :loading="refreshing" @click="refreshGameData">
-      {{ t('Refresh Game Data') }}
+      {{ t("Refresh Game Data") }}
     </el-button>
   </div>
   <div
     :class="{
       error: getMarketDataApi()?.timestamp * 1000 < Date.now() - 1000 * 60 * 120,
-      success: getMarketDataApi()?.timestamp * 1000 > Date.now() - 1000 * 60 * 120,
+      success: getMarketDataApi()?.timestamp * 1000 > Date.now() - 1000 * 60 * 120
     }"
   >
-    <a href="https://www.milkywayidle.com/game_data/marketplace.json" target="_blank" rel="noopener noreferrer">{{ t('市场数据来源(MilkyWayIdle)') }} : {{ new Date(gameStore.marketData?.timestamp! * 1000).toLocaleString() }}</a>
+    <a
+      href="https://www.milkywayidle.com/game_data/marketplace.json"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {{ t("市场数据来源(MilkyWayIdle)") }} : {{ new Date(gameStore.marketData?.timestamp! * 1000).toLocaleString() }}
+    </a>
   </div>
 </template>
 
@@ -44,7 +51,6 @@ async function refreshGameData() {
 
   a {
     color: inherit;
-    // text-decoration: underline;
 
     &:hover {
       opacity: 0.8;
@@ -56,7 +62,6 @@ async function refreshGameData() {
 
   a {
     color: inherit;
-    // text-decoration: underline;
 
     &:hover {
       opacity: 0.8;

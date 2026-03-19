@@ -1,10 +1,12 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import ItemIcon from "@@/components/ItemIcon/index.vue"
 import * as Format from "@/common/utils/format"
-import { getActionDetailOf, getGameDataApi, getItemDetailOf } from "@/common/apis/game"
+import { getActionDetailOf, getGameDataApi, getItemDetailOf, getPriceOf } from "@/common/apis/game"
+import { getManualPriceOf } from "@/common/apis/price"
 import { useMemory } from "@/common/composables/useMemory"
 import { usePriceStatus } from "@/common/composables/usePriceStatus"
 import { getTrans } from "@/locales"
+import { COIN_HRID, PriceStatus } from "@/pinia/stores/game"
 import { useGameStore } from "@/pinia/stores/game"
 import { usePlayerStore } from "@/pinia/stores/player"
 import { usePriceStore } from "@/pinia/stores/price"
@@ -21,9 +23,11 @@ import {
   autoBalanceCompositeWorkflowWeights,
   buildCompositeWorkflowFromBuilderSteps,
   getFixedChainPreset,
+  type CompositeWorkflowResult,
   type BuilderCalculatorClassName,
   type CompositeWorkflowBuilderStep
 } from "./builder"
+import { summarizeWorkflowItems } from "./discovery"
 
 const { t } = useI18n()
 
@@ -51,15 +55,32 @@ const presetName = ref("")
 const stepDetailVisible = ref(false)
 const presetRankVisible = ref(false)
 const presetRankLoading = ref(false)
-const presetRankData = ref<Array<{
+const presetRankDetailVisible = ref(false)
+
+type PriceSide = "L" | "R"
+type WorkflowScenarioBreakdown = {
+  costPH: number
+  incomePH: number
+  profitPD: number
+  valid: boolean
+}
+
+type WorkflowPresetRankRow = {
   id: string
   name: string
-  profitPD: number
-  profitPH: number
+  snapshot: WorkflowPresetSnapshot
+  workflow: CompositeWorkflowResult
+  breakdown_LL: WorkflowScenarioBreakdown
+  breakdown_RL: WorkflowScenarioBreakdown
+  breakdown_LR: WorkflowScenarioBreakdown
+  breakdown_RR: WorkflowScenarioBreakdown
   available: boolean
   valid: boolean
   reason?: string
-}>>([])
+}
+
+const presetRankData = ref<WorkflowPresetRankRow[]>([])
+const presetRankDetailRow = shallowRef<WorkflowPresetRankRow>()
 
 const gameStore = useGameStore()
 const playerStore = usePlayerStore()
@@ -452,37 +473,117 @@ watch([
   workflow.value = buildCompositeWorkflowFromBuilderSteps(state.value.steps)
 }, { immediate: true, deep: true })
 
+function priceOfSide(hrid: string, level: number | undefined, side: PriceSide) {
+  const type = side === "L" ? "ask" : "bid"
+  const manual = getManualPriceOf(hrid, level || 0)?.[type]
+  const v = manual?.manual
+    ? manual.manualPrice
+    : getPriceOf(hrid, level || 0, PriceStatus.ASK, PriceStatus.BID)[type]
+  return typeof v === "number" && Number.isFinite(v) ? v : -1
+}
+
+function priceOfScenarioItem(item: { hrid: string, level?: number, price: number }, side: PriceSide) {
+  // Workflow coin rows represent action fee/reward, not marketplace 1:1 coin pricing.
+  if (item.hrid === COIN_HRID) {
+    return item.price
+  }
+  return priceOfSide(item.hrid, item.level, side)
+}
+
+function computeWorkflowBreakdownBySide(
+  res: ReturnType<typeof buildCompositeWorkflowFromBuilderSteps>,
+  costSide: PriceSide,
+  incomeSide: PriceSide
+): WorkflowScenarioBreakdown {
+  if (!res.available) {
+    return {
+      costPH: -1,
+      incomePH: -1,
+      profitPD: -1,
+      valid: false
+    }
+  }
+
+  // A scenario is considered invalid if any required price is missing under that side.
+  for (const item of res.ingredientList) {
+    if (priceOfScenarioItem(item, costSide) < 0) {
+      return {
+        costPH: -1,
+        incomePH: -1,
+        profitPD: -1,
+        valid: false
+      }
+    }
+  }
+  for (const item of res.productList) {
+    if (priceOfScenarioItem(item, incomeSide) < 0) {
+      return {
+        costPH: -1,
+        incomePH: -1,
+        profitPD: -1,
+        valid: false
+      }
+    }
+  }
+
+  const costPH = res.ingredientList.reduce((acc, item) => acc + item.countPH * priceOfScenarioItem(item, costSide), 0)
+
+  let incomePH = 0
+  for (const product of res.productList) {
+    const price = priceOfScenarioItem(product, incomeSide)
+    const coinRate = product.hrid === COIN_HRID ? 0.98 : 1
+    incomePH += product.countPH * price / coinRate
+  }
+  incomePH *= 0.98
+
+  return {
+    costPH,
+    incomePH,
+    profitPD: (incomePH - costPH) * 24,
+    valid: true
+  }
+}
+
 async function computePresetRank() {
   presetRankLoading.value = true
   try {
-    const rows = presets.value.list.map((p: WorkflowPreset) => {
+    const rows: WorkflowPresetRankRow[] = presets.value.list.map((p: WorkflowPreset) => {
       try {
         const snapshot = normalizeSnapshot(p.snapshot)
         const res = buildCompositeWorkflowFromBuilderSteps(snapshot.steps)
-        const invalid = !res.available || !res.valid
+        const invalid = !res.available
         return {
           id: p.id,
           name: p.name,
-          profitPD: invalid ? -1 : res.profitPD,
-          profitPH: invalid ? -1 : res.profitPH,
+          snapshot,
+          workflow: res,
+          breakdown_LL: invalid ? { costPH: -1, incomePH: -1, profitPD: -1, valid: false } : computeWorkflowBreakdownBySide(res, "L", "L"),
+          breakdown_RL: invalid ? { costPH: -1, incomePH: -1, profitPD: -1, valid: false } : computeWorkflowBreakdownBySide(res, "R", "L"),
+          breakdown_LR: invalid ? { costPH: -1, incomePH: -1, profitPD: -1, valid: false } : computeWorkflowBreakdownBySide(res, "L", "R"),
+          breakdown_RR: invalid ? { costPH: -1, incomePH: -1, profitPD: -1, valid: false } : computeWorkflowBreakdownBySide(res, "R", "R"),
           available: res.available,
           valid: res.valid,
-          reason: invalid ? res.reason : undefined
+          reason: invalid || !res.valid ? res.reason : undefined
         }
       } catch (e: any) {
         return {
           id: p.id,
           name: p.name,
-          profitPD: -1,
-          profitPH: -1,
+          snapshot: normalizeSnapshot(undefined),
+          workflow: buildCompositeWorkflowFromBuilderSteps([]),
+          breakdown_LL: { costPH: -1, incomePH: -1, profitPD: -1, valid: false },
+          breakdown_RL: { costPH: -1, incomePH: -1, profitPD: -1, valid: false },
+          breakdown_LR: { costPH: -1, incomePH: -1, profitPD: -1, valid: false },
+          breakdown_RR: { costPH: -1, incomePH: -1, profitPD: -1, valid: false },
           available: false,
           valid: false,
           reason: e?.message || "error"
         }
       }
     })
-    rows.sort((a: (typeof rows)[number], b: (typeof rows)[number]) => {
-      if (b.profitPD !== a.profitPD) return b.profitPD - a.profitPD
+    rows.sort((a, b) => {
+      // Default sort by the conservative/common scenario: buy at left(ask) and sell at right(bid).
+      if (b.breakdown_LR.profitPD !== a.breakdown_LR.profitPD) return b.breakdown_LR.profitPD - a.breakdown_LR.profitPD
       return a.name.localeCompare(b.name)
     })
     presetRankData.value = rows
@@ -496,9 +597,36 @@ async function openPresetRank() {
   await computePresetRank()
 }
 
-function loadPresetFromRank(id: string) {
-  presets.value.activeId = id
+function copyPresetSnapshot(snapshot: WorkflowPresetSnapshot) {
+  const json = JSON.stringify(snapshot)
+  navigator.clipboard.writeText(json).then(() => {
+    ElMessage.success(t("已复制到剪贴板"))
+  }).catch(() => {
+    ElMessage.error(t("复制失败，请检查浏览器剪贴板权限"))
+  })
+}
+
+function openPresetRankDetail(row: WorkflowPresetRankRow) {
+  presetRankDetailRow.value = row
+  presetRankDetailVisible.value = true
+}
+
+function loadPresetFromRank(row: WorkflowPresetRankRow) {
+  gameStore.buyStatus = PriceStatus.ASK
+  gameStore.sellStatus = PriceStatus.BID
+  onPriceStatusChange()
+  presets.value.activeId = row.id
+  applySnapshot(row.snapshot)
+  workflow.value = buildCompositeWorkflowFromBuilderSteps(row.snapshot.steps)
+  presetName.value = row.name
+  presetRankDetailVisible.value = false
   presetRankVisible.value = false
+}
+
+const currentWorkflowLRBreakdown = computed(() => computeWorkflowBreakdownBySide(workflow.value, "L", "R"))
+
+function currentMatchesPreset(row: WorkflowPresetRankRow) {
+  return JSON.stringify(snapshotCurrent()) === JSON.stringify(normalizeSnapshot(row.snapshot))
 }
 </script>
 
@@ -514,7 +642,7 @@ function loadPresetFromRank(id: string) {
       </div>
 
       <el-alert
-        :title="t('可在前端自由组合步骤，并按你设置的时间占比计算净消耗/净产出与收益。')"
+        :title="t('可在前端自由组合步骤，并按你设置的时间占比计算净消耗、净产出与收益。')"
         type="info"
         :closable="false"
       />
@@ -792,7 +920,7 @@ function loadPresetFromRank(id: string) {
                     {{ Format.number(row.countPH, 3) }}
                   </template>
                 </el-table-column>
-                <el-table-column :label="t('单价')" align="right">
+                <el-table-column :label="t('单价/等效单价')" align="right">
                   <template #default="{ row }">
                     {{ Format.price(row.price) }}
                   </template>
@@ -829,7 +957,7 @@ function loadPresetFromRank(id: string) {
                     {{ Format.number(row.countPH, 3) }}
                   </template>
                 </el-table-column>
-                <el-table-column :label="t('单价')" align="right">
+                <el-table-column :label="t('单价/等效单价')" align="right">
                   <template #default="{ row }">
                     {{ Format.price(row.price) }}
                   </template>
@@ -890,35 +1018,257 @@ function loadPresetFromRank(id: string) {
           {{ t("刷新") }}
         </el-button>
         <div style="color: #909399; font-size: 13px;">
-          {{ t("失效预设利润视为 -1") }}
+          {{ t("失效预设利润视为 -1") }} · {{ t("左价=Ask，右价=Bid") }}
         </div>
       </div>
       <el-table :data="presetRankData" v-loading="presetRankLoading" size="small" style="width: 100%">
         <el-table-column type="index" width="54" />
         <el-table-column prop="name" :label="t('预设')" min-width="180" />
-        <el-table-column :label="t('日利')" width="140" align="right">
+        <el-table-column :label="t('净产出摘要')" min-width="220">
           <template #default="{ row }">
-            <span :class="row.profitPD < 0 ? 'negative' : 'positive'">
-              {{ row.profitPD < 0 ? -1 : Format.money(row.profitPD) }}
+            {{ summarizeWorkflowItems(row.workflow.productList) || "-" }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('净消耗摘要')" min-width="220">
+          <template #default="{ row }">
+            {{ summarizeWorkflowItems(row.workflow.ingredientList) || "-" }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('日利(左买左卖)')" width="160" align="right">
+          <template #default="{ row }">
+            <span :class="row.breakdown_LL.profitPD < 0 ? 'negative' : 'positive'">
+              {{ row.breakdown_LL.profitPD < 0 ? -1 : Format.money(row.breakdown_LL.profitPD) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('利润 / h')" width="140" align="right">
+        <el-table-column :label="t('日利(左买右卖)')" width="160" align="right">
           <template #default="{ row }">
-            <span :class="row.profitPH < 0 ? 'negative' : 'positive'">
-              {{ row.profitPH < 0 ? -1 : Format.money(row.profitPH) }}
+            <span :class="row.breakdown_LR.profitPD < 0 ? 'negative' : 'positive'">
+              {{ row.breakdown_LR.profitPD < 0 ? -1 : Format.money(row.breakdown_LR.profitPD) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('日利(右买右卖)')" width="160" align="right">
+          <template #default="{ row }">
+            <span :class="row.breakdown_RR.profitPD < 0 ? 'negative' : 'positive'">
+              {{ row.breakdown_RR.profitPD < 0 ? -1 : Format.money(row.breakdown_RR.profitPD) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('日利(右买左卖)')" width="160" align="right">
+          <template #default="{ row }">
+            <span :class="row.breakdown_RL.profitPD < 0 ? 'negative' : 'positive'">
+              {{ row.breakdown_RL.profitPD < 0 ? -1 : Format.money(row.breakdown_RL.profitPD) }}
             </span>
           </template>
         </el-table-column>
         <el-table-column prop="reason" :label="t('原因')" min-width="220" />
-        <el-table-column :label="t('操作')" width="100" align="center">
+        <el-table-column :label="t('操作')" width="150" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" @click="loadPresetFromRank(row.id)">
-              {{ t("加载") }}
-            </el-button>
+            <el-space>
+              <el-button link type="primary" @click="openPresetRankDetail(row)">
+                {{ t("详情") }}
+              </el-button>
+              <el-button link type="success" @click="loadPresetFromRank(row)">
+                {{ t("加载") }}
+              </el-button>
+            </el-space>
           </template>
         </el-table-column>
       </el-table>
+    </el-drawer>
+
+    <el-drawer v-model="presetRankDetailVisible" :title="t('预设详情')" size="80%">
+      <template v-if="presetRankDetailRow">
+        <el-space direction="vertical" fill :size="12" style="width: 100%">
+          <el-card shadow="never">
+            <div class="detail-summary">
+              <div>
+                <div class="control-label">{{ t("当前净收益 / 天") }}</div>
+                <div class="summary-value" :class="presetRankDetailRow.workflow.profitPD >= 0 ? 'positive' : 'negative'">
+                  {{ Format.money(presetRankDetailRow.workflow.profitPD) }}
+                </div>
+              </div>
+              <div>
+                <div class="control-label">{{ t("左买右卖 / 天") }}</div>
+                <div class="summary-value" :class="presetRankDetailRow.breakdown_LR.profitPD >= 0 ? 'positive' : 'negative'">
+                  {{ Format.money(presetRankDetailRow.breakdown_LR.profitPD) }}
+                </div>
+              </div>
+              <div>
+                <div class="control-label">{{ t("净收益 / h") }}</div>
+                <div class="summary-value" :class="presetRankDetailRow.workflow.profitPH >= 0 ? 'positive' : 'negative'">
+                  {{ Format.money(presetRankDetailRow.workflow.profitPH) }}
+                </div>
+              </div>
+              <div>
+                <el-space>
+                  <el-button type="primary" @click="loadPresetFromRank(presetRankDetailRow)">
+                    {{ t("加载") }}
+                  </el-button>
+                  <el-button type="success" @click="copyPresetSnapshot(presetRankDetailRow.snapshot)">
+                    {{ t("复制 JSON") }}
+                  </el-button>
+                </el-space>
+              </div>
+            </div>
+          </el-card>
+
+          <el-card v-if="currentMatchesPreset(presetRankDetailRow)" shadow="never">
+            <template #header>
+              <div class="section-title">{{ t("当前对照") }}</div>
+            </template>
+            <div class="detail-summary">
+              <div>
+                <div class="control-label">{{ t("预设排行(左买右卖)") }}</div>
+                <div class="summary-value" :class="presetRankDetailRow.breakdown_LR.profitPD >= 0 ? 'positive' : 'negative'">
+                  {{ Format.money(presetRankDetailRow.breakdown_LR.profitPD) }}
+                </div>
+              </div>
+              <div>
+                <div class="control-label">{{ t("当前面板(左买右卖)") }}</div>
+                <div class="summary-value" :class="currentWorkflowLRBreakdown.profitPD >= 0 ? 'positive' : 'negative'">
+                  {{ Format.money(currentWorkflowLRBreakdown.profitPD) }}
+                </div>
+              </div>
+              <div>
+                <div class="control-label">{{ t("差值") }}</div>
+                <div class="summary-value" :class="currentWorkflowLRBreakdown.profitPD - presetRankDetailRow.breakdown_LR.profitPD >= 0 ? 'positive' : 'negative'">
+                  {{ Format.money(currentWorkflowLRBreakdown.profitPD - presetRankDetailRow.breakdown_LR.profitPD) }}
+                </div>
+              </div>
+            </div>
+          </el-card>
+
+          <el-card shadow="never">
+            <template #header>
+              <div class="section-title">{{ t("场景估值") }}</div>
+            </template>
+            <el-table
+              :data="[
+                { label: t('左买左卖'), breakdown: presetRankDetailRow.breakdown_LL },
+                { label: t('左买右卖'), breakdown: presetRankDetailRow.breakdown_LR },
+                { label: t('右买右卖'), breakdown: presetRankDetailRow.breakdown_RR },
+                { label: t('右买左卖'), breakdown: presetRankDetailRow.breakdown_RL }
+              ]"
+              size="small"
+            >
+              <el-table-column prop="label" :label="t('场景')" width="120" />
+              <el-table-column :label="t('净成本 / h')" align="right">
+                <template #default="{ row }">
+                  {{ row.breakdown.valid ? Format.money(row.breakdown.costPH) : -1 }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('净收入 / h')" align="right">
+                <template #default="{ row }">
+                  {{ row.breakdown.valid ? Format.money(row.breakdown.incomePH) : -1 }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('净收益 / 天')" align="right">
+                <template #default="{ row }">
+                  <span :class="row.breakdown.profitPD < 0 ? 'negative' : 'positive'">
+                    {{ row.breakdown.valid ? Format.money(row.breakdown.profitPD) : -1 }}
+                  </span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+
+          <el-card shadow="never">
+            <template #header>
+              <div class="section-title">{{ t("步骤") }}</div>
+            </template>
+            <div class="step-list">
+              <el-tag
+                v-for="step in presetRankDetailRow.workflow.steps"
+                :key="step.key"
+                effect="plain"
+                type="info"
+                size="large"
+              >
+                {{ step.label }} 路 {{ Format.percent(step.share) }}
+              </el-tag>
+            </div>
+          </el-card>
+
+          <el-row :gutter="12">
+            <el-col :xs="24" :lg="12">
+              <el-card shadow="never">
+                <template #header>
+                  <div class="section-title">{{ t("净消耗") }}</div>
+                </template>
+                <el-table :data="presetRankDetailRow.workflow.ingredientList" size="small">
+                  <el-table-column width="54">
+                    <template #default="{ row }">
+                      <ItemIcon :hrid="row.hrid" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('物品')">
+                    <template #default="{ row }">
+                      {{ t(getItemDetailOf(row.hrid).name) }}
+                      <template v-if="row.level">
+                        +{{ row.level }}
+                      </template>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('数量 / h')" width="120" align="right">
+                    <template #default="{ row }">
+                      {{ Format.number(row.countPH, 3) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('单价/等效单价')" width="110" align="right">
+                    <template #default="{ row }">
+                      {{ Format.price(row.price) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('估值 / h')" width="130" align="right">
+                    <template #default="{ row }">
+                      {{ Format.money(row.totalPH) }}
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
+            </el-col>
+            <el-col :xs="24" :lg="12">
+              <el-card shadow="never">
+                <template #header>
+                  <div class="section-title">{{ t("净产出") }}</div>
+                </template>
+                <el-table :data="presetRankDetailRow.workflow.productList" size="small">
+                  <el-table-column width="54">
+                    <template #default="{ row }">
+                      <ItemIcon :hrid="row.hrid" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('物品')">
+                    <template #default="{ row }">
+                      {{ t(getItemDetailOf(row.hrid).name) }}
+                      <template v-if="row.level">
+                        +{{ row.level }}
+                      </template>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('数量 / h')" width="120" align="right">
+                    <template #default="{ row }">
+                      {{ Format.number(row.countPH, 3) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('单价/等效单价')" width="110" align="right">
+                    <template #default="{ row }">
+                      {{ Format.price(row.price) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('估值 / h')" width="130" align="right">
+                    <template #default="{ row }">
+                      {{ Format.money(row.totalPH) }}
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
+            </el-col>
+          </el-row>
+        </el-space>
+      </template>
     </el-drawer>
   </div>
 </template>
@@ -1009,3 +1359,7 @@ function loadPresetFromRank(id: string) {
   }
 }
 </style>
+
+
+
+

@@ -106,7 +106,7 @@ export class TransmuteCalculator extends AlchemyCalculator {
   _productList?: Product[]
   get productList(): Product[] {
     if (!this._productList) {
-      const dropTable = this.item.alchemyDetail.transmuteDropTable
+      const dropTable = this.item.alchemyDetail.transmuteDropTable ?? []
       this._productList = dropTable.map(drop => ({
         hrid: drop.itemHrid,
         count: (drop.maxCount - (drop.itemHrid === this.item.hrid ? drop.maxCount : 0)) * this.item.alchemyDetail.bulkMultiplier,
@@ -131,7 +131,7 @@ export class TransmuteCalculator extends AlchemyCalculator {
   }
 
   get sameItemCounter(): number {
-    const product = this.item.alchemyDetail.transmuteDropTable.find(p => p.itemHrid === this.item.hrid)
+    const product = this.item.alchemyDetail.transmuteDropTable?.find(p => p.itemHrid === this.item.hrid)
     if (!product) return 0
     return Math.min(1, product.maxCount * (product.dropRate || 1) * this.successRate)
   }

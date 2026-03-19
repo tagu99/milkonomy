@@ -75,6 +75,12 @@ function mergeWorkflowItems(list: CompositeWorkflowItem[]) {
     if (current) {
       current.countPH += item.countPH
       current.totalPH += item.totalPH
+      if (current.countPH > EPSILON) {
+        // Items like coin can come from multiple steps with different fixed effective prices.
+        // Show a weighted average unit price so the merged row stays interpretable.
+        current.price = current.totalPH / current.countPH
+        current.marketPrice = current.price
+      }
       return
     }
     map.set(key, { ...item })

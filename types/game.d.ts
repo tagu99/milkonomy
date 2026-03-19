@@ -128,7 +128,8 @@ export interface AlchemyDetail {
   isCoinifiable: boolean
   decomposeItems: Item[]
   transmuteSuccessRate: number
-  transmuteDropTable: DropTableItem[]
+  // Game data uses `null` when an item cannot be transmuted.
+  transmuteDropTable: DropTableItem[] | null
 }
 
 // #endregion

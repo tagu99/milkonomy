@@ -15,8 +15,6 @@ const _communityBuffTypeDetailMapCache: Record<string, CommunityBuffDetail> = {}
 
 let _processingProductMap: Record<string, string> = {}
 let _priceCache = {} as Record<string, MarketItemPrice>
-let currentBuyStatus = useGameStoreOutside().buyStatus
-let currentSellStatus = useGameStoreOutside().sellStatus
 watch(() => useGameStoreOutside().gameData, () => {
   const data = structuredClone(toRaw(useGameStoreOutside().gameData))
   game.gameData = data ? deepFreeze(data) : data
@@ -35,14 +33,6 @@ watch([() => useGameStoreOutside().buyStatus, () => useGameStoreOutside().sellSt
   _priceCache = {}
 }, { immediate: true })
 
-watch(() => useGameStoreOutside().buyStatus, (newVal) => {
-  currentBuyStatus = newVal
-}, { immediate: true })
-
-watch(() => useGameStoreOutside().sellStatus, (newVal) => {
-  currentSellStatus = newVal
-}, { immediate: true })
-
 /** 查 */
 export function getGameDataApi() {
   const res = game.gameData
@@ -52,15 +42,32 @@ export function getMarketDataApi() {
   const res = game.marketData
   return res!
 }
-const SPECIAL_PRICE: Record<string, () => MarketItemPrice> = {
-  "/items/cowbell": () => ({
-    ask: getPriceOf("/items/bag_of_10_cowbells").ask / 10 || 40000,
-    bid: getPriceOf("/items/bag_of_10_cowbells").bid / 10 || 40000
-  }),
-  "/items/coin": () => ({
-    ask: 1,
-    bid: 1
-  })
+function priceCacheKey(hrid: string, buyStatus: PriceStatus, sellStatus: PriceStatus) {
+  return `${hrid}|${buyStatus}|${sellStatus}`
+}
+
+function getCurrentBuyStatus() {
+  return useGameStoreOutside().buyStatus
+}
+
+function getCurrentSellStatus() {
+  return useGameStoreOutside().sellStatus
+}
+
+function getSpecialPrice(hrid: string, buyStatus: PriceStatus, sellStatus: PriceStatus): MarketItemPrice | undefined {
+  if (hrid === "/items/cowbell") {
+    return {
+      ask: getPriceOf("/items/bag_of_10_cowbells", 0, buyStatus, sellStatus).ask / 10 || 40000,
+      bid: getPriceOf("/items/bag_of_10_cowbells", 0, buyStatus, sellStatus).bid / 10 || 40000
+    }
+  }
+  if (hrid === "/items/coin") {
+    return {
+      ask: 1,
+      bid: 1
+    }
+  }
+  return undefined
 }
 
 function convertPriceOfStatus(price: MarketItemPrice, buyStatus: PriceStatus, sellStatus: PriceStatus) {
@@ -140,7 +147,12 @@ function priceStepOf(price: number, high: boolean = true) {
   return high ? (price + priceStep[highStepIndex][1]) * 10 ** dec : (price - priceStep[lowStepIndex][1]) * 10 ** dec
 }
 
-export function getPriceOf(hrid: string, level: number = 0, buyStatus: PriceStatus = currentBuyStatus, sellStatus: PriceStatus = currentSellStatus): MarketItemPrice {
+export function getPriceOf(
+  hrid: string,
+  level: number = 0,
+  buyStatus: PriceStatus = getCurrentBuyStatus(),
+  sellStatus: PriceStatus = getCurrentSellStatus()
+): MarketItemPrice {
   if (!hrid) {
     return {
       ask: -1,
@@ -159,16 +171,19 @@ export function getPriceOf(hrid: string, level: number = 0, buyStatus: PriceStat
     return convertPriceOfStatus(price, buyStatus, sellStatus)
   }
 
-  if (_priceCache[hrid]) {
-    return _priceCache[hrid]
+  const cacheKey = priceCacheKey(hrid, buyStatus, sellStatus)
+
+  if (_priceCache[cacheKey]) {
+    return _priceCache[cacheKey]
   }
-  if (SPECIAL_PRICE[hrid]) {
-    _priceCache[hrid] = SPECIAL_PRICE[hrid]()
-    return _priceCache[hrid]
+  const specialPrice = getSpecialPrice(hrid, buyStatus, sellStatus)
+  if (specialPrice) {
+    _priceCache[cacheKey] = specialPrice
+    return _priceCache[cacheKey]
   }
   if (isLoot(hrid) && hrid !== "/items/bag_of_10_cowbells") {
-    _priceCache[hrid] = getLootPrice(hrid)
-    return _priceCache[hrid]
+    _priceCache[cacheKey] = getLootPrice(hrid, buyStatus, sellStatus)
+    return _priceCache[cacheKey]
   }
   const shopItem = getGameDataApi().shopItemDetailMap[`/shop_items/${item.hrid.split("/").pop()}`]
   const price = (getMarketDataApi().marketData[item.hrid]?.[0]) || { ask: -1, bid: -1 }
@@ -176,20 +191,24 @@ export function getPriceOf(hrid: string, level: number = 0, buyStatus: PriceStat
   if (shopItem && shopItem.costs[0].itemHrid === COIN_HRID) {
     price.ask = price.ask === -1 ? shopItem.costs[0].count : Math.min(price.ask, shopItem.costs[0].count)
   }
-  _priceCache[hrid] = convertPriceOfStatus(price, buyStatus, sellStatus)
+  _priceCache[cacheKey] = convertPriceOfStatus(price, buyStatus, sellStatus)
 
-  return _priceCache[hrid]
+  return _priceCache[cacheKey]
 }
 
 function isLoot(hrid: string) {
   return getItemDetailOf(hrid).categoryHrid === "/item_categories/loot"
 }
 
-function getLootPrice(hrid: string): MarketItemPrice {
+function getLootPrice(
+  hrid: string,
+  buyStatus: PriceStatus = getCurrentBuyStatus(),
+  sellStatus: PriceStatus = getCurrentSellStatus()
+): MarketItemPrice {
   const drop = getGameDataApi().openableLootDropMap[hrid]
   return drop.reduce((acc, cur) => {
     const count = (cur.maxCount + cur.minCount) / 2
-    const item = getPriceOf(cur.itemHrid)
+    const item = getPriceOf(cur.itemHrid, 0, buyStatus, sellStatus)
     acc.ask += item.ask * count * cur.dropRate
     acc.bid += item.bid * count * cur.dropRate
     return acc

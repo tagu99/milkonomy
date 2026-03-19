@@ -94,7 +94,8 @@ const SUPPLEMENTAL_ITEMS_LIST: ItemDetail[] = [
         }
       ],
       transmuteSuccessRate: 0,
-      transmuteDropTable: []
+      // Match game data pattern: absent transmute table is represented as null.
+      transmuteDropTable: null
     }
     return item
   })(),

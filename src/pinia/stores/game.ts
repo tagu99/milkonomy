@@ -2,7 +2,6 @@ import type Calculator from "@/calculator"
 import type { DecomposeCalculator } from "@/calculator/alchemy"
 import type { EnhanceCalculator } from "@/calculator/enhance"
 import type { ManufactureCalculator } from "@/calculator/manufacture"
-
 import type { WorkflowCalculator } from "@/calculator/workflow"
 import type { Action, GameData, NoncombatStatsKey } from "~/game"
 import type { Market, MarketData, MarketDataPlain, MarketItemPrice } from "~/market"
@@ -34,14 +33,12 @@ export const EQUIPMENT_LIST = [
   "legs",
   "feet",
   "hands",
-
   "ring",
   "neck",
   "earrings",
   "back",
   "off_hand",
   "pouch",
-  // 'main_hand'
   "charm"
 ] as const
 
@@ -57,6 +54,7 @@ const DEFAULT_HOUSE = {
   Experience: 0.0005,
   RareFind: 0.002
 }
+
 export const HOUSE_MAP: Record<Action, Partial<Record<NoncombatStatsKey, number>>> = {
   milking: { ...DEFAULT_HOUSE },
   foraging: { ...DEFAULT_HOUSE },
@@ -76,13 +74,9 @@ export const HOUSE_MAP: Record<Action, Partial<Record<NoncombatStatsKey, number>
 }
 
 export enum PriceStatus {
-  // 左价
   ASK = "ASK",
-  // 右价
   BID = "BID",
-  // 比左价低一档
   ASK_LOW = "ASK_LOW",
-  // 比右价高一档
   BID_HIGH = "BID_HIGH"
 }
 
@@ -94,11 +88,6 @@ export const PRICE_STATUS_LIST = [
 ]
 
 export interface TryFetchDataOptions {
-  /**
-   * 是否刷新游戏静态数据（items/actions 等）。
-   * - `true`：优先从远端拉取最新数据，失败则回退到本地 `public/data/data.json`
-   * - `false`：仅刷新市场数据（更轻量，适合定时刷新）
-   */
   refreshGameData?: boolean
 }
 
@@ -136,6 +125,7 @@ export const useGameStore = defineStore("game", {
           ElMessage.error(t("获取数据第{0}次失败，正在重试...", [5 - retryCount]))
         }
       }
+
       if (fetchSucceeded) {
         return
       }
@@ -143,22 +133,14 @@ export const useGameStore = defineStore("game", {
         ElMessage.error(t("数据获取失败，直接使用缓存数据"))
         return
       }
-      if (retryCount < 0) {
-        ElMessage.error(t("数据获取失败，请检查网络连接"))
-        throw new Error("强制宕机")
-      }
+      ElMessage.error(t("数据获取失败，请检查网络连接"))
+      throw new Error("force crash")
     },
+
     async fetchData(offset: number, options: TryFetchDataOptions = {}) {
-      // 如果数据time晚于30min前，无需更新，减少流量
-      // if (this.gameData && this.marketData && this.marketData.timestamp * 1000 > Date.now() - 1000 * 60 * 30) {
-      //   return
-      // }
       const url = import.meta.env.MODE === "development" ? "/" : "./"
-      const MARKET_URLS = [
-        // "https://mooket.qi-e.top/market/api.json",
-        "https://www.milkywayidle.com/game_data/marketplace.json"
-      ]
-      const marketUrl = MARKET_URLS[(4 - offset) % MARKET_URLS.length]
+      const marketUrls = ["https://www.milkywayidle.com/game_data/marketplace.json"]
+      const marketUrl = marketUrls[(4 - offset) % marketUrls.length]
 
       const localGameDataUrl = `${url}data/data.json`
       const gameDataUrls = [...DEFAULT_GAME_DATA_URLS, localGameDataUrl]
@@ -175,7 +157,7 @@ export const useGameStore = defineStore("game", {
       if (!marketRes.ok) {
         throw new Error("Market response not ok")
       }
-      const newMarketData = await marketRes.json()
+      const newMarketData = await marketRes.json() as MarketDataPlain
 
       const prevGameVersion = this.gameData?.gameVersion
       const newGameData = applySupplementalGameData(gameDataResult.data)!
@@ -192,8 +174,7 @@ export const useGameStore = defineStore("game", {
         throw new Error("Missing game data")
       }
 
-      // 如果缓存数据的时间戳与新数据相同，则不更新
-      if (this.marketData?.timestamp && this.marketData?.timestamp === newMarketData.timestamp) {
+      if (this.marketData?.timestamp && this.marketData.timestamp === newMarketData.timestamp) {
         return
       }
 
@@ -202,14 +183,13 @@ export const useGameStore = defineStore("game", {
     },
 
     savePriceStatus() {
-      // saveBuyStatus(this.buyStatus)
-      // saveSellStatus(this.sellStatus)
       this.clearAllCaches()
     },
     resetPriceStatus() {
       this.buyStatus = loadBuyStatus()
       this.sellStatus = loadSellStatus()
     },
+
     getLeaderboardCache() {
       return this.leaderboardCache[this.marketData!.timestamp]
     },
@@ -220,6 +200,7 @@ export const useGameStore = defineStore("game", {
     clearLeaderBoardCache() {
       this.leaderboardCache = {}
     },
+
     getEnhanposerCache() {
       return this.enhanposerCache[this.marketData!.timestamp]
     },
@@ -230,6 +211,7 @@ export const useGameStore = defineStore("game", {
     clearEnhanposerCache() {
       this.enhanposerCache = {}
     },
+
     getManualchemyCache() {
       return this.manualchemyCache[this.marketData!.timestamp]
     },
@@ -240,6 +222,7 @@ export const useGameStore = defineStore("game", {
     clearManualchemyCache() {
       this.manualchemyCache = {}
     },
+
     getJungleCache(key: string) {
       return this.jungleCache[key]
     },
@@ -253,6 +236,7 @@ export const useGameStore = defineStore("game", {
         this.jungleCache = {}
       }
     },
+
     getJunglestCache() {
       return this.junglestCache[this.marketData!.timestamp]
     },
@@ -263,6 +247,7 @@ export const useGameStore = defineStore("game", {
     clearJunglestCache() {
       this.junglestCache = {}
     },
+
     getInheritCache() {
       return this.inheritCache[this.marketData!.timestamp]
     },
@@ -273,6 +258,7 @@ export const useGameStore = defineStore("game", {
     clearInheritCache() {
       this.inheritCache = {}
     },
+
     getDecomposeCache() {
       return this.decomposeCache[this.marketData!.timestamp]
     },
@@ -283,13 +269,13 @@ export const useGameStore = defineStore("game", {
     clearDecomposeCache() {
       this.decomposeCache = {}
     },
+
     setSecret(value: string) {
       this.secret = value
       saveSecret(value)
     },
     checkSecret() {
       return true
-      // return import.meta.env.VITE_BUILD_MODE === "private"
     },
 
     clearAllCaches() {
@@ -327,9 +313,8 @@ async function fetchJsonWithFallback<T>(urls: string[]): Promise<{ url: string, 
 
 function updateMarketData(oldData: MarketData | null, newData: MarketDataPlain, newGameData: GameData): MarketData {
   const oldMarket = oldData?.marketData || {}
-  const newMarket: Market = { }
+  const newMarket: Market = {}
 
-  // 将 MarketDataPlain 转成 MarketData 的结构
   for (const hrid in newData.marketData) {
     if (newData.marketData[hrid]) {
       newMarket[hrid] = {}
@@ -342,15 +327,14 @@ function updateMarketData(oldData: MarketData | null, newData: MarketDataPlain, 
     }
   }
 
-  // 取得name->isEquipment的映射
   const itemDetailMap = newGameData.itemDetailMap
   const isEquipmentMap: Record<string, boolean> = {}
   for (const key in itemDetailMap) {
     const item = itemDetailMap[key]
     isEquipmentMap[item.hrid] = item.categoryHrid === "/item_categories/equipment"
   }
+
   for (const hrid in newMarket) {
-    // 如果是装备，则不保留旧值
     if (isEquipmentMap[hrid] || !oldMarket[hrid]) {
       continue
     }
@@ -365,19 +349,11 @@ function updateMarketData(oldData: MarketData | null, newData: MarketDataPlain, 
     }
   }
 
-  // 有些物品可能是oldMarket有的，newMarket没有的
-  // for (const key in oldMarket) {
-  //   if (!newMarket[key] && !isEquipmentMap[key]) {
-  //     newMarket[key] = JSON.parse(JSON.stringify(oldMarket[key]))
-  //   }
-  // }
-
   const result = {
     timestamp: newData.timestamp,
     marketData: newMarket
   }
   setMarketData(result)
-
   return result
 }
 
@@ -400,7 +376,6 @@ function setGameData(value: GameData) {
 function loadSecret() {
   return localStorage.getItem(`${KEY_PREFIX}secrete`) || ""
 }
-
 function saveSecret(value: string) {
   localStorage.setItem(`${KEY_PREFIX}secrete`, value)
 }

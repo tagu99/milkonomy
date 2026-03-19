@@ -16,7 +16,8 @@
     "preview": "vite preview",
     "lint": "eslint . --fix",
     "prepare": "husky",
-    "test": "vitest"
+    "test": "vitest",
+    "run-alchemy": "node --loader ts-node/esm --no-warnings scripts/alchemy-leaderboard/index.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.1",

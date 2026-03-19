@@ -7,5 +7,11 @@ npx vue-tsc
 npx lint-staged
 
 # 运行版本更新脚本
+<<<<<<< HEAD
 npx ts-node-esm scripts/update-version.ts
 git add package.json
+=======
+tsx scripts/update-version.ts
+git add package.json
+
+>>>>>>> a27007c20a652e19c4d21d2ec9a31a1584090d7e
