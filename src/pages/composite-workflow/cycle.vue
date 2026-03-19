@@ -112,6 +112,10 @@ function formatMaybeHours(value: number) {
   return `${Format.number(value, 3)} h`
 }
 
+function formatOutputSource(source: "transmute" | "bonus") {
+  return source === "bonus" ? t("额外掉落") : t("转化产物")
+}
+
 watch([
   () => gameStore.marketData,
   () => gameStore.buyStatus,
@@ -261,6 +265,13 @@ watch([
               </span>
             </template>
           </el-table-column>
+          <el-table-column :label="t('利润率')" width="120" align="right">
+            <template #default="{ row }">
+              <span :class="row.bestProfitRate >= 0 ? 'positive' : 'negative'">
+                {{ Format.percent(row.bestProfitRate) }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('单件净收益')" width="140" align="right">
             <template #default="{ row }">
               <span :class="row.bestProfitPerItem >= 0 ? 'positive' : 'negative'">
@@ -312,6 +323,18 @@ watch([
                 </div>
               </div>
               <div>
+                <div class="control-label">{{ t("利润率") }}</div>
+                <div class="summary-value" :class="detailRow.bestProfitRate >= 0 ? 'positive' : 'negative'">
+                  {{ Format.percent(detailRow.bestProfitRate) }}
+                </div>
+              </div>
+              <div>
+                <div class="control-label">{{ t("单件总成本") }}</div>
+                <div class="summary-value">
+                  {{ Format.money(detailRow.bestTotalCostPerItem) }}
+                </div>
+              </div>
+              <div>
                 <div class="control-label">{{ t("单件耗时") }}</div>
                 <div class="summary-value">
                   {{ formatMaybeHours(detailRow.bestHoursPerItem) }}
@@ -358,6 +381,57 @@ watch([
               </el-card>
             </el-col>
           </el-row>
+
+          <el-card shadow="never">
+            <template #header>
+              <div class="hero-title">{{ t("循环外收益产物") }}</div>
+            </template>
+
+            <el-table
+              v-if="detailRow.bestExternalOutputs.length"
+              :data="detailRow.bestExternalOutputs"
+              size="small"
+              style="width: 100%"
+            >
+              <el-table-column width="54">
+                <template #default="{ row }">
+                  <ItemIcon :hrid="row.hrid" />
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('物品')" min-width="180">
+                <template #default="{ row }">
+                  {{ row.name }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('来源')" width="120" align="center">
+                <template #default="{ row }">
+                  <el-tag effect="plain" :type="row.source === 'bonus' ? 'success' : 'info'">
+                    {{ formatOutputSource(row.source) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('单件期望数量')" width="140" align="right">
+                <template #default="{ row }">
+                  {{ Format.number(row.expectedUnitsPerItem, 4) }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('单价')" width="120" align="right">
+                <template #default="{ row }">
+                  {{ Format.money(row.unitPrice) }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('单件价值')" width="140" align="right">
+                <template #default="{ row }">
+                  {{ Format.money(row.totalValuePerItem) }}
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <el-empty
+              v-else
+              :description="t('当前最佳起手在最优策略下没有额外的循环外收益产物。')"
+            />
+          </el-card>
 
           <el-card shadow="never">
             <template #header>

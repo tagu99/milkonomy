@@ -3,6 +3,7 @@ import type { DecomposeCalculator } from "@/calculator/alchemy"
 import type { EnhanceCalculator } from "@/calculator/enhance"
 import type { ManufactureCalculator } from "@/calculator/manufacture"
 import type { WorkflowCalculator } from "@/calculator/workflow"
+import type { StableEnhanceRow } from "@/common/apis/jungle/stable"
 import type { Action, GameData, NoncombatStatsKey } from "~/game"
 import type { Market, MarketData, MarketDataPlain, MarketItemPrice } from "~/market"
 import { defineStore } from "pinia"
@@ -105,6 +106,7 @@ export const useGameStore = defineStore("game", {
     manualchemyCache: {} as { [time: number]: Calculator[] },
     jungleCache: {} as { [key: string]: WorkflowCalculator[] },
     junglestCache: {} as { [time: number]: EnhanceCalculator[] },
+    stableEnhanceCache: {} as { [key: string]: StableEnhanceRow[] },
     inheritCache: {} as { [time: number]: ManufactureCalculator[] },
     decomposeCache: {} as { [time: number]: DecomposeCalculator[] },
     secret: loadSecret(),
@@ -248,6 +250,20 @@ export const useGameStore = defineStore("game", {
       this.junglestCache = {}
     },
 
+    getStableEnhanceCache(key: string = "default") {
+      return this.stableEnhanceCache[key]
+    },
+    setStableEnhanceCache(list: StableEnhanceRow[], key: string = "default") {
+      this.stableEnhanceCache[key] = list
+    },
+    clearStableEnhanceCache(key?: string) {
+      if (key) {
+        delete this.stableEnhanceCache[key]
+      } else {
+        this.stableEnhanceCache = {}
+      }
+    },
+
     getInheritCache() {
       return this.inheritCache[this.marketData!.timestamp]
     },
@@ -286,6 +302,7 @@ export const useGameStore = defineStore("game", {
       this.clearEnhanposerCache()
       this.clearJungleCache()
       this.clearJunglestCache()
+      this.clearStableEnhanceCache()
     }
   }
 })

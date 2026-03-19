@@ -67,6 +67,16 @@ export const privateRoutes: RouteRecordRaw[] = [
         }
       },
       {
+        path: "stable-enhance",
+        component: () => import("@/pages/jungle/stable.vue"),
+        name: "StableEnhance",
+        meta: {
+          title: "稳定强化",
+          affix: false,
+          elIcon: "Compass"
+        }
+      },
+      {
         path: "inherit",
         component: () => import("@/pages/inherit/index.vue"),
         name: "inherit",

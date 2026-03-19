@@ -26,12 +26,23 @@ export interface CycleWorkflowItemRow {
   keepValue: number
   transmuteValue: number
   resolvedValue: number
+  totalCostPerItem: number
   profitPerItem: number
+  profitRate: number
   hoursPerItem: number
   actionsPerItem: number
   profitPH: number
   profitPD: number
   shouldTransmute: boolean
+}
+
+export interface CycleWorkflowExternalOutputRow {
+  hrid: string
+  name: string
+  expectedUnitsPerItem: number
+  unitPrice: number
+  totalValuePerItem: number
+  source: "transmute" | "bonus"
 }
 
 export interface CycleWorkflowRow {
@@ -45,10 +56,13 @@ export interface CycleWorkflowRow {
   bestStartName: string
   bestAction: "transmute" | "keep"
   bestProfitPerItem: number
+  bestProfitRate: number
   bestProfitPH: number
   bestProfitPD: number
   bestResolvedValue: number
+  bestTotalCostPerItem: number
   bestHoursPerItem: number
+  bestExternalOutputs: CycleWorkflowExternalOutputRow[]
   details: CycleWorkflowItemRow[]
 }
 
@@ -68,6 +82,13 @@ interface TransmuteEdge {
   expectedUnits: number
 }
 
+interface ExternalOutputEdge {
+  hrid: string
+  expectedUnits: number
+  price: number
+  source: "transmute" | "bonus"
+}
+
 interface CycleNode {
   hrid: string
   name: string
@@ -77,9 +98,15 @@ interface CycleNode {
   keepValue: number
   actionHours: number
   extraCostPerBatch: number
-  outsideValuePerBatch: number
-  bonusValuePerBatch: number
+  externalOutputsPerBatch: ExternalOutputEdge[]
   insideOutputs: TransmuteEdge[]
+}
+
+interface ExternalOutputValue {
+  hrid: string
+  price: number
+  source: "transmute" | "bonus"
+  expectedUnitsPerItem: number
 }
 
 function getItemName(hrid: string) {
@@ -119,6 +146,53 @@ function getResolvedPrice(hrid: string, side: "ask" | "bid") {
   if (hasValidPrice(opposite)) return opposite
 
   return -1
+}
+
+function buildExternalOutputKey(hrid: string, source: "transmute" | "bonus") {
+  return `${source}:${hrid}`
+}
+
+function appendExternalOutput(
+  outputMap: Map<string, ExternalOutputEdge>,
+  hrid: string,
+  expectedUnits: number,
+  price: number,
+  source: "transmute" | "bonus"
+) {
+  if (expectedUnits <= EPSILON) return
+  const key = buildExternalOutputKey(hrid, source)
+  const current = outputMap.get(key)
+  if (current) {
+    current.expectedUnits += expectedUnits
+    return
+  }
+  outputMap.set(key, {
+    hrid,
+    expectedUnits,
+    price,
+    source
+  })
+}
+
+function getExternalOutputValuePerBatch(outputs: ExternalOutputEdge[]) {
+  return outputs.reduce((total, output) => total + output.expectedUnits * output.price, 0)
+}
+
+function getExternalOutputMapDiff(
+  current: Map<string, ExternalOutputValue>,
+  next: Map<string, ExternalOutputValue>
+) {
+  let maxDiff = 0
+  const keys = new Set<string>([
+    ...Array.from(current.keys()),
+    ...Array.from(next.keys())
+  ])
+  for (const key of keys) {
+    const currentUnits = current.get(key)?.expectedUnitsPerItem || 0
+    const nextUnits = next.get(key)?.expectedUnitsPerItem || 0
+    maxDiff = Math.max(maxDiff, Math.abs(nextUnits - currentUnits))
+  }
+  return maxDiff
 }
 
 function getTransmutableHrids(includeEquipment: boolean) {
@@ -242,7 +316,7 @@ function buildCycleNodeMap(group: string[], options: CycleWorkflowOptions) {
     }
 
     const insideOutputs: TransmuteEdge[] = []
-    let outsideValuePerBatch = 0
+    const externalOutputMap = new Map<string, ExternalOutputEdge>()
     for (const drop of item.alchemyDetail?.transmuteDropTable || []) {
       const expectedUnits = (drop.dropRate || 0) * drop.maxCount * batchSize * calculator.successRate
       if (expectedUnits <= EPSILON) continue
@@ -253,11 +327,10 @@ function buildCycleNodeMap(group: string[], options: CycleWorkflowOptions) {
         if (!hasValidPrice(price)) {
           return null
         }
-        outsideValuePerBatch += expectedUnits * price
+        appendExternalOutput(externalOutputMap, drop.itemHrid, expectedUnits, price, "transmute")
       }
     }
 
-    let bonusValuePerBatch = 0
     if (options.includeBonusDrops) {
       const structuralOutputs = new Set((item.alchemyDetail?.transmuteDropTable || []).map(drop => drop.itemHrid))
       for (const product of calculator.productListWithPrice) {
@@ -269,7 +342,7 @@ function buildCycleNodeMap(group: string[], options: CycleWorkflowOptions) {
           return null
         }
         const expectedUnits = (product.countPH || 0) / calculator.actionsPH
-        bonusValuePerBatch += expectedUnits * productPrice
+        appendExternalOutput(externalOutputMap, product.hrid, expectedUnits, productPrice, "bonus")
       }
     }
 
@@ -282,8 +355,7 @@ function buildCycleNodeMap(group: string[], options: CycleWorkflowOptions) {
       keepValue: sellPrice,
       actionHours: 1 / calculator.actionsPH,
       extraCostPerBatch,
-      outsideValuePerBatch,
-      bonusValuePerBatch,
+      externalOutputsPerBatch: Array.from(externalOutputMap.values()),
       insideOutputs
     })
   }
@@ -292,7 +364,7 @@ function buildCycleNodeMap(group: string[], options: CycleWorkflowOptions) {
 }
 
 function computeTransmuteValuePerUnit(node: CycleNode, values: Map<string, number>) {
-  let total = -node.extraCostPerBatch + node.outsideValuePerBatch + node.bonusValuePerBatch
+  let total = -node.extraCostPerBatch + getExternalOutputValuePerBatch(node.externalOutputsPerBatch)
   for (const output of node.insideOutputs) {
     total += output.expectedUnits * (values.get(output.hrid) || 0)
   }
@@ -367,6 +439,81 @@ function solveLinearPerUnit(
   return values
 }
 
+function solveExternalOutputsPerUnit(
+  group: string[],
+  nodeMap: Map<string, CycleNode>,
+  shouldTransmute: Map<string, boolean>
+) {
+  const values = new Map<string, Map<string, ExternalOutputValue>>()
+  group.forEach((hrid) => values.set(hrid, new Map()))
+
+  for (let iter = 0; iter < MAX_LINEAR_ITERS; iter++) {
+    let maxDiff = 0
+    const next = new Map<string, Map<string, ExternalOutputValue>>()
+
+    for (const hrid of group) {
+      const node = nodeMap.get(hrid)!
+      if (!shouldTransmute.get(hrid)) {
+        next.set(hrid, new Map())
+        continue
+      }
+
+      const perBatchMap = new Map<string, ExternalOutputValue>()
+      for (const output of node.externalOutputsPerBatch) {
+        const key = buildExternalOutputKey(output.hrid, output.source)
+        perBatchMap.set(key, {
+          hrid: output.hrid,
+          price: output.price,
+          source: output.source,
+          expectedUnitsPerItem: output.expectedUnits
+        })
+      }
+
+      for (const insideOutput of node.insideOutputs) {
+        const childMap = values.get(insideOutput.hrid) || new Map()
+        for (const [key, childValue] of childMap.entries()) {
+          const current = perBatchMap.get(key)
+          const expectedUnits = childValue.expectedUnitsPerItem * insideOutput.expectedUnits
+          if (current) {
+            current.expectedUnitsPerItem += expectedUnits
+          } else {
+            perBatchMap.set(key, {
+              hrid: childValue.hrid,
+              price: childValue.price,
+              source: childValue.source,
+              expectedUnitsPerItem: expectedUnits
+            })
+          }
+        }
+      }
+
+      const perUnitMap = new Map<string, ExternalOutputValue>()
+      for (const [key, value] of perBatchMap.entries()) {
+        const expectedUnitsPerItem = value.expectedUnitsPerItem / node.batchSize
+        if (expectedUnitsPerItem <= EPSILON) continue
+        if (!Number.isFinite(expectedUnitsPerItem) || expectedUnitsPerItem > 1e12) {
+          return null
+        }
+        perUnitMap.set(key, {
+          ...value,
+          expectedUnitsPerItem
+        })
+      }
+
+      next.set(hrid, perUnitMap)
+      maxDiff = Math.max(maxDiff, getExternalOutputMapDiff(values.get(hrid) || new Map(), perUnitMap))
+    }
+
+    values.clear()
+    next.forEach((value, hrid) => values.set(hrid, value))
+    if (maxDiff <= VALUE_TOLERANCE) {
+      break
+    }
+  }
+
+  return values
+}
+
 function analyzeCycleGroup(group: string[], options: CycleWorkflowOptions): CycleWorkflowRow | null {
   const nodeMap = buildCycleNodeMap(group, options)
   if (!nodeMap) return null
@@ -385,13 +532,17 @@ function analyzeCycleGroup(group: string[], options: CycleWorkflowOptions): Cycl
 
   const hoursPerItem = solveLinearPerUnit(group, nodeMap, shouldTransmute, node => node.actionHours)
   const actionsPerItem = solveLinearPerUnit(group, nodeMap, shouldTransmute, () => 1)
-  if (!hoursPerItem || !actionsPerItem) return null
+  const operationCostPerItem = solveLinearPerUnit(group, nodeMap, shouldTransmute, node => node.extraCostPerBatch)
+  const externalOutputsPerItem = solveExternalOutputsPerUnit(group, nodeMap, shouldTransmute)
+  if (!hoursPerItem || !actionsPerItem || !operationCostPerItem || !externalOutputsPerItem) return null
 
   const details: CycleWorkflowItemRow[] = group.map((hrid) => {
     const node = nodeMap.get(hrid)!
     const resolvedValue = resolvedValues.get(hrid) || 0
     const hours = hoursPerItem.get(hrid) || 0
+    const totalCostPerItem = node.buyPrice + (operationCostPerItem.get(hrid) || 0)
     const profitPerItem = resolvedValue - node.buyPrice
+    const profitRate = totalCostPerItem > EPSILON ? profitPerItem / totalCostPerItem : 0
     const profitPH = shouldTransmute.get(hrid) && hours > EPSILON ? profitPerItem / hours : Number.NEGATIVE_INFINITY
     const profitPD = Number.isFinite(profitPH) ? profitPH * 24 : Number.NEGATIVE_INFINITY
 
@@ -404,7 +555,9 @@ function analyzeCycleGroup(group: string[], options: CycleWorkflowOptions): Cycl
       keepValue: node.keepValue,
       transmuteValue: transmuteValues.get(hrid) || node.keepValue,
       resolvedValue,
+      totalCostPerItem,
       profitPerItem,
+      profitRate,
       hoursPerItem: hours,
       actionsPerItem: actionsPerItem.get(hrid) || 0,
       profitPH,
@@ -460,6 +613,21 @@ function analyzeCycleGroup(group: string[], options: CycleWorkflowOptions): Cycl
     })
     .map(item => item.hrid)
 
+  const bestExternalOutputs = Array.from((externalOutputsPerItem.get(best.hrid) || new Map()).values())
+    .map(output => ({
+      hrid: output.hrid,
+      name: getItemName(output.hrid),
+      expectedUnitsPerItem: output.expectedUnitsPerItem,
+      unitPrice: output.price,
+      totalValuePerItem: output.expectedUnitsPerItem * output.price,
+      source: output.source
+    }))
+    .sort((left, right) => {
+      if (right.totalValuePerItem !== left.totalValuePerItem) return right.totalValuePerItem - left.totalValuePerItem
+      if (right.expectedUnitsPerItem !== left.expectedUnitsPerItem) return right.expectedUnitsPerItem - left.expectedUnitsPerItem
+      return left.name.localeCompare(right.name)
+    })
+
   return {
     signature: group.slice().sort().join("|"),
     name,
@@ -471,10 +639,13 @@ function analyzeCycleGroup(group: string[], options: CycleWorkflowOptions): Cycl
     bestStartName: best.name,
     bestAction: best.shouldTransmute ? "transmute" : "keep",
     bestProfitPerItem: best.profitPerItem,
+    bestProfitRate: best.profitRate,
     bestProfitPH: best.profitPH,
     bestProfitPD: best.profitPD,
     bestResolvedValue: best.resolvedValue,
+    bestTotalCostPerItem: best.totalCostPerItem,
     bestHoursPerItem: best.hoursPerItem,
+    bestExternalOutputs,
     details
   }
 }
