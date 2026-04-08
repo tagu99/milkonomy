@@ -1,14 +1,7 @@
 import type { RouteRecordRaw } from "vue-router"
-import locale from "@/locales"
 
 const Layouts = () => import("@/layouts/index.vue")
-const { t } = locale.global
 
-/**
- * 私有路由配置
- * 这些路由只会在私有版本中包含
- * 在构建公开版本时，这些路由和对应的页面文件将不会被打包
- */
 export const privateRoutes: RouteRecordRaw[] = [
   {
     path: "/",
@@ -20,7 +13,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/enhancest/index.vue"),
         name: "Enhancest",
         meta: {
-          title: t("超级强化计算"),
+          title: "超级强化计算",
           elIcon: "MagicStick",
           affix: false
         }
@@ -32,7 +25,7 @@ export const privateRoutes: RouteRecordRaw[] = [
     component: Layouts,
     redirect: "/jungle",
     meta: {
-      title: t("打野工具"),
+      title: "打野工具",
       elIcon: "Compass"
     },
     children: [
@@ -41,7 +34,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/jungle/index.vue"),
         name: "Jungle",
         meta: {
-          title: t("打野工具"),
+          title: "打野工具",
           affix: false,
           elIcon: "Compass"
         }
@@ -51,7 +44,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/junglest/index.vue"),
         name: "junglest",
         meta: {
-          title: t("超级打野工具"),
+          title: "超级打野工具",
           affix: false,
           elIcon: "Compass"
         }
@@ -61,17 +54,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/junglest/inherit.vue"),
         name: "junglerit",
         meta: {
-          title: t("继承打野工具"),
-          affix: false,
-          elIcon: "Compass"
-        }
-      },
-      {
-        path: "stable-enhance",
-        component: () => import("@/pages/jungle/stable.vue"),
-        name: "StableEnhance",
-        meta: {
-          title: "稳定强化",
+          title: "继承打野工具",
           affix: false,
           elIcon: "Compass"
         }
@@ -81,7 +64,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/inherit/index.vue"),
         name: "inherit",
         meta: {
-          title: t("继承"),
+          title: "继承",
           affix: false,
           elIcon: "Compass"
         }
@@ -91,7 +74,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/decompose/index.vue"),
         name: "decompose",
         meta: {
-          title: t("分解"),
+          title: "分解",
           affix: false,
           elIcon: "Compass"
         }
@@ -101,9 +84,90 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/jungle/pickout.vue"),
         name: "Pickout",
         meta: {
-          title: t("捡漏工具"),
+          title: "捡漏工具",
           affix: false,
           elIcon: "Compass"
+        }
+      }
+    ]
+  },
+  {
+    path: "/",
+    component: Layouts,
+    redirect: "/strategy-overview",
+    meta: {
+      title: "强化策略",
+      elIcon: "MagicStick"
+    },
+    children: [
+      {
+        path: "strategy-overview",
+        component: () => import("@/pages/jungle/strategy-overview.vue"),
+        name: "StrategyOverview",
+        meta: {
+          title: "策略总览",
+          affix: false,
+          elIcon: "MagicStick"
+        }
+      },
+      {
+        path: "stable-enhance",
+        component: () => import("@/pages/jungle/stable.vue"),
+        name: "StableEnhance",
+        meta: {
+          title: "稳定强化",
+          affix: false,
+          elIcon: "MagicStick"
+        }
+      },
+      {
+        path: "inherit-saving",
+        component: () => import("@/pages/jungle/inherit-saving.vue"),
+        name: "InheritSaving",
+        meta: {
+          title: "继承省钱",
+          affix: false,
+          elIcon: "MagicStick"
+        }
+      },
+      {
+        path: "recovery-floor",
+        component: () => import("@/pages/jungle/recovery-floor.vue"),
+        name: "RecoveryFloor",
+        meta: {
+          title: "回收底价",
+          affix: false,
+          elIcon: "MagicStick"
+        }
+      },
+      {
+        path: "demand-heat",
+        component: () => import("@/pages/jungle/demand-heat.vue"),
+        name: "DemandHeat",
+        meta: {
+          title: "需求热度",
+          affix: false,
+          elIcon: "MagicStick"
+        }
+      },
+      {
+        path: "bargain-analysis",
+        component: () => import("@/pages/jungle/bargain-analysis.vue"),
+        name: "BargainAnalysis",
+        meta: {
+          title: "捡漏分析",
+          affix: false,
+          elIcon: "MagicStick"
+        }
+      },
+      {
+        path: "market-warning",
+        component: () => import("@/pages/jungle/market-warning.vue"),
+        name: "MarketWarning",
+        meta: {
+          title: "反操盘提醒",
+          affix: false,
+          elIcon: "MagicStick"
         }
       }
     ]
@@ -118,7 +182,7 @@ export const privateRoutes: RouteRecordRaw[] = [
         component: () => import("@/pages/manualchemy/index.vue"),
         name: "Manualchemy",
         meta: {
-          title: t("制作炼金"),
+          title: "制作炼金",
           svgIcon: "dashboard"
         }
       }
@@ -127,14 +191,14 @@ export const privateRoutes: RouteRecordRaw[] = [
   {
     path: "/",
     component: Layouts,
-    redirect: "/enhanposer",
+    redirect: "/enhanposest",
     children: [
       {
         path: "enhanposest",
         component: () => import("@/pages/enhanposer/enhanposest.vue"),
         name: "Enhanposest",
         meta: {
-          title: t("超级强化分解"),
+          title: "超级强化分解",
           affix: false,
           svgIcon: "dashboard"
         }

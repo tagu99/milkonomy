@@ -1,8 +1,12 @@
 import type Calculator from "@/calculator"
 import type { DecomposeCalculator } from "@/calculator/alchemy"
 import type { EnhanceCalculator } from "@/calculator/enhance"
+import type { BargainAnalysisRow } from "@/common/apis/jungle/bargain-analysis"
 import type { ManufactureCalculator } from "@/calculator/manufacture"
+import type { DemandHeatRow } from "@/common/apis/jungle/demand-heat"
+import type { MarketWarningRow } from "@/common/apis/jungle/market-warning"
 import type { WorkflowCalculator } from "@/calculator/workflow"
+import type { RecoveryFloorRow } from "@/common/apis/jungle/recovery-floor"
 import type { StableEnhanceRow } from "@/common/apis/jungle/stable"
 import type { Action, GameData, NoncombatStatsKey } from "~/game"
 import type { Market, MarketData, MarketDataPlain, MarketItemPrice } from "~/market"
@@ -107,6 +111,10 @@ export const useGameStore = defineStore("game", {
     jungleCache: {} as { [key: string]: WorkflowCalculator[] },
     junglestCache: {} as { [time: number]: EnhanceCalculator[] },
     stableEnhanceCache: {} as { [key: string]: StableEnhanceRow[] },
+    recoveryFloorCache: {} as { [key: string]: RecoveryFloorRow[] },
+    demandHeatCache: {} as { [key: string]: DemandHeatRow[] },
+    bargainAnalysisCache: {} as { [key: string]: BargainAnalysisRow[] },
+    marketWarningCache: {} as { [key: string]: MarketWarningRow[] },
     inheritCache: {} as { [time: number]: ManufactureCalculator[] },
     decomposeCache: {} as { [time: number]: DecomposeCalculator[] },
     secret: loadSecret(),
@@ -264,6 +272,62 @@ export const useGameStore = defineStore("game", {
       }
     },
 
+    getRecoveryFloorCache(key: string = "default") {
+      return this.recoveryFloorCache[key]
+    },
+    setRecoveryFloorCache(list: RecoveryFloorRow[], key: string = "default") {
+      this.recoveryFloorCache[key] = list
+    },
+    clearRecoveryFloorCache(key?: string) {
+      if (key) {
+        delete this.recoveryFloorCache[key]
+      } else {
+        this.recoveryFloorCache = {}
+      }
+    },
+
+    getDemandHeatCache(key: string = "default") {
+      return this.demandHeatCache[key]
+    },
+    setDemandHeatCache(list: DemandHeatRow[], key: string = "default") {
+      this.demandHeatCache[key] = list
+    },
+    clearDemandHeatCache(key?: string) {
+      if (key) {
+        delete this.demandHeatCache[key]
+      } else {
+        this.demandHeatCache = {}
+      }
+    },
+
+    getBargainAnalysisCache(key: string = "default") {
+      return this.bargainAnalysisCache[key]
+    },
+    setBargainAnalysisCache(list: BargainAnalysisRow[], key: string = "default") {
+      this.bargainAnalysisCache[key] = list
+    },
+    clearBargainAnalysisCache(key?: string) {
+      if (key) {
+        delete this.bargainAnalysisCache[key]
+      } else {
+        this.bargainAnalysisCache = {}
+      }
+    },
+
+    getMarketWarningCache(key: string = "default") {
+      return this.marketWarningCache[key]
+    },
+    setMarketWarningCache(list: MarketWarningRow[], key: string = "default") {
+      this.marketWarningCache[key] = list
+    },
+    clearMarketWarningCache(key?: string) {
+      if (key) {
+        delete this.marketWarningCache[key]
+      } else {
+        this.marketWarningCache = {}
+      }
+    },
+
     getInheritCache() {
       return this.inheritCache[this.marketData!.timestamp]
     },
@@ -303,6 +367,10 @@ export const useGameStore = defineStore("game", {
       this.clearJungleCache()
       this.clearJunglestCache()
       this.clearStableEnhanceCache()
+      this.clearRecoveryFloorCache()
+      this.clearDemandHeatCache()
+      this.clearBargainAnalysisCache()
+      this.clearMarketWarningCache()
     }
   }
 })

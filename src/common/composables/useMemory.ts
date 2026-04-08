@@ -1,18 +1,33 @@
 import { debounce } from "lodash-es"
 import { ref } from "vue"
-// 自定义 Hook
+
+function mergeWithDefault(defaultValue: any, storedValue: any) {
+  if (
+    defaultValue
+    && typeof defaultValue === "object"
+    && !Array.isArray(defaultValue)
+    && storedValue
+    && typeof storedValue === "object"
+    && !Array.isArray(storedValue)
+  ) {
+    return {
+      ...defaultValue,
+      ...storedValue
+    }
+  }
+  return storedValue
+}
+
 export function useMemory(key: string, defaultValue: any, delay: number = 500) {
-  // 从 localStorage 初始化
   const initialValue = () => {
     try {
       const stored = localStorage.getItem(key)
-      return stored ? JSON.parse(stored) : defaultValue
+      return stored ? mergeWithDefault(defaultValue, JSON.parse(stored)) : defaultValue
     } catch {
       return defaultValue
     }
   }
 
-  // 创建响应式变量
   const value = ref(initialValue())
   const saveDebounced = debounce((val) => {
     try {

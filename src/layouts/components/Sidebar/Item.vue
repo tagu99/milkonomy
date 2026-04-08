@@ -46,6 +46,13 @@ function resolvePath(routePath: string) {
       return path.resolve(props.basePath, routePath)
   }
 }
+
+function resolveSubMenuIndex(route: RouteRecordRaw) {
+  if (route.name) {
+    return `name:${String(route.name)}`
+  }
+  return `path:${resolvePath(route.path)}|title:${String(route.meta?.title || "")}`
+}
 </script>
 
 <template>
@@ -60,7 +67,7 @@ function resolvePath(routePath: string) {
       </el-menu-item>
     </Link>
   </template>
-  <el-sub-menu v-else :index="resolvePath(props.item.path)" teleported>
+  <el-sub-menu v-else :index="resolveSubMenuIndex(props.item)" teleported>
     <template #title>
       <SvgIcon v-if="props.item.meta?.svgIcon" :name="props.item.meta.svgIcon" class="svg-icon" />
       <component v-else-if="props.item.meta?.elIcon" :is="props.item.meta.elIcon" class="el-icon" />

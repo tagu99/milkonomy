@@ -303,8 +303,11 @@ function buildCycleNodeMap(group: string[], options: CycleWorkflowOptions) {
     }
 
     let extraCostPerBatch = 0
-    for (const ingredient of calculator.ingredientListWithPrice) {
-      if (ingredient.hrid === hrid) continue
+    for (const [index, ingredient] of calculator.ingredientListWithPrice.entries()) {
+      // The first ingredient is the base item being evaluated and is priced separately as buyPrice.
+      // Other ingredients must still be counted even if they share the same HRID, such as
+      // transmuting Catalyst of Transmutation while also consuming one on success.
+      if (index === 0) continue
       if (!options.includeTeaCost && isDrinkItem(ingredient.hrid)) continue
       const ingredientPrice = hasValidPrice(ingredient.price)
         ? ingredient.price

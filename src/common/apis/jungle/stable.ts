@@ -1,11 +1,9 @@
 import type { ItemDetail } from "~/game"
+import { ElMessage } from "element-plus"
 import { EnhanceCalculator } from "@/calculator/enhance"
-import locales from "@/locales"
-import { useGameStoreOutside } from "@/pinia/stores/game"
 import { getEquipmentTypeOf } from "@/common/utils/game"
+import { useGameStoreOutside } from "@/pinia/stores/game"
 import { getGameDataApi, getPriceOf } from "../game"
-
-const { t } = locales.global
 
 const LEVEL_COUNT = 21
 const DEMAND_WINDOW_RADIUS = 2
@@ -37,8 +35,16 @@ export interface StableEnhanceRow {
   profitPP: number
   profitRate: number
   expPH: number
+  expPerLossRatio: number
   expectedLossPH: number
   profitToLossRatio: number
+  singleCapital: number
+  expectedRecoveryPerTarget: number
+  recoveryRate: number
+  realEscapeLevel: number
+  fallbackMode: string
+  thinMarket: boolean
+  thinMarketReasons: string[]
   hoursPerTarget: number
   actionsPerTarget: number
   successRate: number
@@ -48,18 +54,23 @@ export interface StableEnhanceRow {
   calculator: EnhanceCalculator
 }
 
+export interface StableEnhanceRowsOptions {
+  originLevelMode?: "zero_only" | "all"
+  silent?: boolean
+}
+
 function hasPrice(value: number) {
   return Number.isFinite(value) && value > 0
 }
 
 function getPricedLevels(item: ItemDetail, side: "ask" | "bid") {
-  const result: number[] = []
+  const levels: number[] = []
   for (let level = 0; level < LEVEL_COUNT; level++) {
     if (hasPrice(getPriceOf(item.hrid, level)[side])) {
-      result.push(level)
+      levels.push(level)
     }
   }
-  return result
+  return levels
 }
 
 function getTargetNeighborDemandCount(demandLevels: number[], targetLevel: number) {
@@ -75,6 +86,24 @@ function getDemandScore(
   return demandCoverage * 100 + demandLevelCount * 3 + twoWayLevelCount * 4 + targetNeighborDemandCount * 8
 }
 
+function getThinMarketReasons(
+  demandLevelCount: number,
+  twoWayLevelCount: number,
+  targetNeighborDemandCount: number
+) {
+  const reasons: string[] = []
+  if (demandLevelCount <= 2) {
+    reasons.push("有收购价的等级过少")
+  }
+  if (twoWayLevelCount <= 1) {
+    reasons.push("双边有价等级过少")
+  }
+  if (targetNeighborDemandCount <= 1) {
+    reasons.push("目标等级附近需求稀薄")
+  }
+  return reasons
+}
+
 function dominates(left: StableEnhanceRow, right: StableEnhanceRow) {
   const notWorse = left.profitPH >= right.profitPH
     && left.expectedLossPH <= right.expectedLossPH
@@ -86,9 +115,7 @@ function dominates(left: StableEnhanceRow, right: StableEnhanceRow) {
 }
 
 function pruneNonDominated(rows: StableEnhanceRow[]) {
-  return rows.filter((row, index) => {
-    return !rows.some((other, otherIndex) => otherIndex !== index && dominates(other, row))
-  })
+  return rows.filter((row, index) => !rows.some((other, otherIndex) => otherIndex !== index && dominates(other, row)))
 }
 
 function sortRows(rows: StableEnhanceRow[], sort?: { prop?: string, order?: string }) {
@@ -105,8 +132,9 @@ function sortRows(rows: StableEnhanceRow[], sort?: { prop?: string, order?: stri
     return list
   }
 
-  const props = sort.prop.split(".")
-  const getValue = (row: any) => props.reduce((value, key) => value?.[key], row)
+  const path = sort.prop.split(".")
+  const getValue = (row: StableEnhanceRow | Record<string, any>) => path.reduce<any>((value, key) => value?.[key], row)
+
   list.sort((left, right) => {
     const leftValue = getValue(left)
     const rightValue = getValue(right)
@@ -122,7 +150,7 @@ function sortRows(rows: StableEnhanceRow[], sort?: { prop?: string, order?: stri
   return list
 }
 
-function filterRows(rows: StableEnhanceRow[], params: any) {
+function filterRows(rows: StableEnhanceRow[], params: Record<string, any>) {
   let list = rows.slice()
 
   if (params.name) {
@@ -130,49 +158,59 @@ function filterRows(rows: StableEnhanceRow[], params: any) {
     list = list.filter(row => row.name.match(nameRegex))
   }
 
-  if (params.minLevel) {
-    list = list.filter(row => row.targetLevel >= params.minLevel)
+  if (Number.isFinite(params.minLevel)) {
+    list = list.filter(row => row.targetLevel >= Number(params.minLevel))
   }
-  if (params.maxLevel) {
-    list = list.filter(row => row.targetLevel <= params.maxLevel)
+  if (Number.isFinite(params.maxLevel)) {
+    list = list.filter(row => row.targetLevel <= Number(params.maxLevel))
   }
-  if (params.minItemLevel) {
-    list = list.filter(row => row.itemLevel >= params.minItemLevel)
+  if (Number.isFinite(params.minItemLevel)) {
+    list = list.filter(row => row.itemLevel >= Number(params.minItemLevel))
   }
-  if (params.maxLossPH) {
-    list = list.filter(row => row.expectedLossPH <= params.maxLossPH)
+  if (Number.isFinite(params.maxLossPH)) {
+    list = list.filter(row => row.expectedLossPH <= Number(params.maxLossPH))
   }
-  if (params.maxHoursPerTarget) {
-    list = list.filter(row => row.hoursPerTarget <= params.maxHoursPerTarget)
+  if (Number.isFinite(params.maxSingleCapital)) {
+    list = list.filter(row => row.singleCapital <= Number(params.maxSingleCapital))
   }
-  if (params.minDemandLevels) {
-    list = list.filter(row => row.demandLevelCount >= params.minDemandLevels)
+  if (Number.isFinite(params.maxHoursPerTarget)) {
+    list = list.filter(row => row.hoursPerTarget <= Number(params.maxHoursPerTarget))
   }
-  if (params.minDemandCoverage) {
-    list = list.filter(row => row.demandCoverage >= params.minDemandCoverage)
+  if (Number.isFinite(params.minProfitPH)) {
+    list = list.filter(row => row.profitPH >= Number(params.minProfitPH))
   }
-  if (params.minNeighborDemand) {
-    list = list.filter(row => row.targetNeighborDemandCount >= params.minNeighborDemand)
+  if (Number.isFinite(params.minExpPH)) {
+    list = list.filter(row => row.expPH >= Number(params.minExpPH))
+  }
+  if (Number.isFinite(params.minExpPerLossRatio)) {
+    list = list.filter(row => row.expPerLossRatio >= Number(params.minExpPerLossRatio))
+  }
+  if (Number.isFinite(params.minDemandLevels)) {
+    list = list.filter(row => row.demandLevelCount >= Number(params.minDemandLevels))
+  }
+  if (Number.isFinite(params.minDemandCoverage)) {
+    list = list.filter(row => row.demandCoverage >= Number(params.minDemandCoverage))
+  }
+  if (Number.isFinite(params.minNeighborDemand)) {
+    list = list.filter(row => row.targetNeighborDemandCount >= Number(params.minNeighborDemand))
   }
   if (!params.allowNegativeProfit) {
     list = list.filter(row => row.profitPH >= 0)
-  }
-  if (typeof params.minProfitPH === "number") {
-    list = list.filter(row => row.profitPH >= params.minProfitPH)
   }
   if (params.originLevelMode === "zero_only") {
     list = list.filter(row => row.originLevel === 0)
   }
   if (params.banJewelry) {
-    list = list.filter((row) => {
-      return row.itemType !== "neck" && row.itemType !== "ring" && row.itemType !== "earrings"
-    })
+    list = list.filter(row => !["neck", "ring", "earrings"].includes(row.itemType))
+  }
+  if (params.excludeThinMarket) {
+    list = list.filter(row => !row.thinMarket)
   }
 
   return list
 }
 
-function paginateRows(rows: StableEnhanceRow[], params: any) {
+function paginateRows(rows: StableEnhanceRow[], params: Record<string, any>) {
   const currentPage = Math.max(1, Number(params.currentPage) || 1)
   const size = Math.max(1, Number(params.size) || 20)
   return {
@@ -181,7 +219,7 @@ function paginateRows(rows: StableEnhanceRow[], params: any) {
   }
 }
 
-function buildStableRows(params: any) {
+function buildStableRows(params: Record<string, any>) {
   const gameData = getGameDataApi()
   const items = Object.values(gameData.itemDetailMap).filter(item => item.enhancementCosts)
   const rows: StableEnhanceRow[] = []
@@ -202,7 +240,12 @@ function buildStableRows(params: any) {
       if (!hasPrice(targetPrice)) continue
 
       const targetNeighborDemandCount = getTargetNeighborDemandCount(demandLevels, targetLevel)
-      const demandScore = getDemandScore(demandCoverage, demandLevels.length, twoWayLevels.length, targetNeighborDemandCount)
+      const demandScore = getDemandScore(
+        demandCoverage,
+        demandLevels.length,
+        twoWayLevels.length,
+        targetNeighborDemandCount
+      )
       const candidates: StableEnhanceRow[] = []
       const originLevels = originLevelMode === "zero_only"
         ? [0]
@@ -214,6 +257,7 @@ function buildStableRows(params: any) {
 
         for (const escapeLevel of DEFAULT_ESCAPE_LEVELS) {
           if (escapeLevel >= originLevel) continue
+
           const minProtectLevel = Math.max(targetLevel > 2 ? 2 : targetLevel, escapeLevel + 1)
           for (let protectLevel = minProtectLevel; protectLevel <= targetLevel; protectLevel++) {
             const calculator = new EnhanceCalculator({
@@ -222,22 +266,43 @@ function buildStableRows(params: any) {
               enhanceLevel: targetLevel,
               protectLevel,
               escapeLevel,
-              project: `+${originLevel} → +${targetLevel}`
+              project: `+${originLevel} -> +${targetLevel}`
             })
             if (!calculator.available) continue
 
             calculator.run()
+
             const targetProduct = calculator.productListWithPrice[0]
             const targetCountPH = targetProduct?.countPH || 0
             if (!targetCountPH || !Number.isFinite(targetCountPH)) continue
 
             const successRate = calculator.result.successRate || 0
             const hoursPerTarget = targetCountPH > 0 ? 1 / targetCountPH : Number.POSITIVE_INFINITY
-            const actionsPerTarget = targetProduct.count > 0 ? 1 / targetProduct.count : Number.POSITIVE_INFINITY
+            const actionsPerTarget = targetProduct?.count > 0 ? 1 / targetProduct.count : Number.POSITIVE_INFINITY
             const expectedLossPH = Math.max(0, calculator.cost * calculator.consumePH - calculator.gainEscapePH)
             const profitPH = calculator.result.profitPH || 0
-            const profitToLossRatio = expectedLossPH > 0 ? profitPH / expectedLossPH : (profitPH >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY)
+            const profitToLossRatio = expectedLossPH > 0
+              ? profitPH / expectedLossPH
+              : (profitPH >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY)
+            const singleCapital = Number.isFinite(hoursPerTarget)
+              ? Math.max(0, calculator.result.costPH * hoursPerTarget)
+              : Number.POSITIVE_INFINITY
+            const expectedRecoveryPerTarget = targetCountPH > 0 ? calculator.gainEscapePH / targetCountPH : 0
+            const recoveryRate = singleCapital > 0 ? expectedRecoveryPerTarget / singleCapital : 0
+            const expPH = calculator.result.expPH || 0
+            const expPerLossRatio = expectedLossPH > 0
+              ? expPH / expectedLossPH
+              : (expPH > 0 ? Number.POSITIVE_INFINITY : 0)
             const enhancelate = calculator.enhancelate()
+            const realEscapeLevel = calculator.realEscapeLevel
+            const fallbackMode = realEscapeLevel < 0
+              ? "不逃脱"
+              : (realEscapeLevel === 0 ? "白板卖出" : `+${realEscapeLevel} 逃脱卖出`)
+            const thinMarketReasons = getThinMarketReasons(
+              demandLevels.length,
+              twoWayLevels.length,
+              targetNeighborDemandCount
+            )
 
             candidates.push({
               signature: `${item.hrid}|${originLevel}|${targetLevel}|${protectLevel}|${escapeLevel}`,
@@ -264,9 +329,17 @@ function buildStableRows(params: any) {
               profitPH,
               profitPP: calculator.result.profitPP || 0,
               profitRate: calculator.result.profitRate || 0,
-              expPH: calculator.result.expPH || 0,
+              expPH,
+              expPerLossRatio,
               expectedLossPH,
               profitToLossRatio,
+              singleCapital,
+              expectedRecoveryPerTarget,
+              recoveryRate,
+              realEscapeLevel,
+              fallbackMode,
+              thinMarket: thinMarketReasons.length > 0,
+              thinMarketReasons,
               hoursPerTarget,
               actionsPerTarget,
               successRate,
@@ -293,22 +366,36 @@ function buildStableRows(params: any) {
   return rows
 }
 
-export async function getStableEnhanceDataApi(params: any) {
-  const cacheKey = `stable-enhance:${params.originLevelMode === "all" ? "all" : "zero_only"}`
+async function ensureStableEnhanceRows(originLevelMode: "zero_only" | "all" = "zero_only", silent = false) {
+  const cacheKey = `stable-enhance:${originLevelMode}`
   let rows = useGameStoreOutside().getStableEnhanceCache(cacheKey)
+
   if (!rows) {
     await new Promise(resolve => setTimeout(resolve, 300))
-    const startTime = Date.now()
+    const startedAt = Date.now()
     try {
-      rows = buildStableRows(params)
+      rows = buildStableRows({ originLevelMode })
     } catch (error) {
       console.error(error)
       rows = []
     }
     useGameStoreOutside().setStableEnhanceCache(rows, cacheKey)
-    ElMessage.success(t("计算完成，耗时{0}秒", [((Date.now() - startTime) / 1000).toFixed(1)]))
+    if (!silent) {
+      ElMessage.success(`稳定强化计算完成，耗时${((Date.now() - startedAt) / 1000).toFixed(1)}秒`)
+    }
   }
 
+  return rows
+}
+
+export async function getStableEnhanceRows(options: StableEnhanceRowsOptions = {}) {
+  const originLevelMode = options.originLevelMode === "all" ? "all" : "zero_only"
+  return ensureStableEnhanceRows(originLevelMode, !!options.silent)
+}
+
+export async function getStableEnhanceDataApi(params: Record<string, any>) {
+  const originLevelMode = params.originLevelMode === "all" ? "all" : "zero_only"
+  const rows = await ensureStableEnhanceRows(originLevelMode)
   const filteredRows = filterRows(rows, params)
   const sortedRows = sortRows(filteredRows, params.sort)
   return paginateRows(sortedRows, params)
